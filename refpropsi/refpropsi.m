@@ -78,9 +78,6 @@ function varargout = refpropsi(prop_req, prop1, value1, prop2, value2, fluid, x,
     %== Variables ==%
     persistent current_fluid ;
     persistent RP_PATH
-    if isempty(RP_PATH)
-        RP_PATH = find_refprop_path() ;
-    end
     RP_CHAR_LEN = 256 ;
     RP_REFS_LEN = 4 ;
     RP_MERR_LEN = 256 ;
@@ -106,7 +103,7 @@ function varargout = refpropsi(prop_req, prop1, value1, prop2, value2, fluid, x,
         warning_flag = false ;
     end
     if length(x)~=length(fluid)
-        error('Refprop:massFraction', 'Fluid and x must have the sane size') ;
+        error('Refprop:massFraction', 'Fluid and x must have same size') ;
     end
     if abs(sum(x)-1)>1e-10
         error('Refprop:massFraction', 'Sum of x must be 1') ;
@@ -128,6 +125,11 @@ function varargout = refpropsi(prop_req, prop1, value1, prop2, value2, fluid, x,
     
     
     %== Load and setup ==%
+    % Find refprop path if needed
+    if isempty(RP_PATH)
+        RP_PATH = find_refprop_path() ;
+    end
+    
     % Load refprop dll if needed
     if ~libisloaded(LIB_NAME)
         load_refprop() ;
@@ -283,29 +285,37 @@ function varargout = refpropsi(prop_req, prop1, value1, prop2, value2, fluid, x,
         arch = computer('arch') ;
 
         % Check computer architecture
-        if strcmp(arch, 'win32')
-            dllname = 'refprop.dll' ;
-            prototype = @rp_proto ;
-        elseif strcmp(arch, 'win64')
-            dllname = 'refprp64.dll' ;
-            prototype = @() rp_proto64(RP_PATH) ;
-        else
-            error('Unsupported architecture: %s', arch) ;
+        switch(arch)
+            case 'win32'
+                dllname = 'refprop.dll' ;
+                prototype = @() rp_proto(RP_PATH) ;
+                
+            case 'win64'
+                dllname = 'refprp64.dll' ;
+                prototype = @() rp_proto64(RP_PATH) ;
+                
+            case 'glnxa64'
+                dllname = 'librefprop.so'  ;
+                prototype = @() rp_proto64(RP_PATH) ;
+                
+            otherwise
+                error('Refprop:unsupported', 'Unsupported architecture: %s', arch) ;
         end
 
         % Load refprop
-        loadlibrary([RP_PATH, dllname], prototype, 'alias', LIB_NAME) ;
+        path = fullfile(RP_PATH, dllname) ;
+        loadlibrary(path, prototype, 'alias', LIB_NAME) ;
     end
 
     function set_fluid(fluid)
         % Set fluid in refprop
         nf = length(fluid) ;
         
-        fluidstr = cellfun(@(s) [RP_PATH, 'fluids\', s,'.fld'], fluid, 'UniformOutput', 0) ;
+        fluidstr = cellfun(@(s) fullfile(RP_PATH, 'fluids', [s,'.fld']), fluid, 'UniformOutput', 0) ;
         fluidstr = strjoin(fluidstr,'|');
         fluidstr = [fluidstr, zeros(1, RP_CHAR_LEN*RP_NCOMP_MAX-length(fluidstr))] ;
         
-        mixstr = [RP_PATH, 'fluids\hmx.bnc'];
+        mixstr = fullfile(RP_PATH, 'fluids', 'hmx.bnc');
         mixstr = [mixstr, zeros(1, RP_CHAR_LEN*RP_NCOMP_MAX-length(mixstr))] ;
         
         refstr = ['DEF', 0] ;
@@ -315,12 +325,26 @@ function varargout = refpropsi(prop_req, prop1, value1, prop2, value2, fluid, x,
 
     function path = find_refprop_path()
         % Find refprop folder
-        path = 'C:\Program files\Refprop\' ;
+        arch = computer('arch') ;
+
+        % Check computer architecture
+        path = '' ;
+        switch(arch)
+            case {'win32', 'win64'}
+                path = 'C:\Program files\Refprop\' ;
+                if ~exist(path, 'dir')
+                    path = 'C:\Program files (x86)\Refprop\' ;
+                end
+                
+            case 'glnxa64'
+                path = '/opt/refprop/' ;
+                
+            otherwise
+                error('Refprop:unsupported', 'Unsupported architecture: %s', arch) ;
+        end
+        
         if ~exist(path, 'dir')
-            path = 'C:\Program files (x86)\Refprop\' ;
-            if ~exist(path, 'dir')
-                error('Unable to find refprop folder') ;
-            end
+            error('Refprop:path', 'Unable to find refprop folder') ;
         end
     end
 
